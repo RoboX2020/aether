@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aether — an instrument played with your hands</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="hud">
+      <div class="meta">
+        <span class="note" id="note">—</span>
+        <span class="sep">·</span>
+        <span class="status" id="status">tap begin to start</span>
+      </div>
+      <div class="legend">
+        <span><strong>right hand</strong> pitch + pan · pinch to play</span>
+        <span class="sep">·</span>
+        <span><strong>left hand</strong> volume + tone · pinch to toggle reverb</span>
+      </div>
+    </div>
+
+    <div id="splash">
+      <div class="splash-inner">
+        <h1>aether</h1>
+        <p class="tagline">an instrument played with your hands</p>
+        <button id="start">begin</button>
+        <p class="hint">needs webcam + microphone access</p>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
