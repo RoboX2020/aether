@@ -1,3 +1,9 @@
+/*
+  Aether - the look of the hand-played instrument. See app.js for behavior.
+  The vibe: near-black background, glowing neon particles, hidden mirrored
+  webcam, a big gradient title on the start screen, and a tiny HUD at the
+  bottom. cursor: none on the body because your hands ARE the pointer.
+*/
 * {
   box-sizing: border-box;
   margin: 0;

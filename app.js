@@ -1,8 +1,41 @@
+// ============================================================================
+// Aether - an instrument you play with your hands in mid-air.
+//
+// HOW TO PLAY: open the page, click "begin", allow the webcam.
+//   RIGHT hand: its height/position picks the musical note; pinch thumb +
+//               index to make the note sound.
+//   LEFT hand:  height controls loudness and brightness; pinch to toggle a
+//               big echo (reverb) on and off.
+//
+// THE THREE FILES:
+//   index.html  the page skeleton (video, canvas, start screen)
+//   style.css   the look (dark, glowy, neon particles)
+//   app.js      THIS FILE: all the behavior
+//
+// HOW APP.JS WORKS, BIG PICTURE:
+//   1. MediaPipe (Google's hand-tracking AI, loaded from a CDN) watches the
+//      webcam and reports 21 landmarks per hand, several times a second.
+//   2. The Web Audio API (built into the browser) synthesizes the sound
+//      from raw oscillators - there are NO audio files in this project.
+//   3. A canvas draws the glowing skeletons and particle trails.
+//   4. loop() runs once per screen frame and ties it all together.
+//
+// WHEN DEBUGGING (reasoned from the code):
+//   - Nothing happens on click: the browser blocks audio until a user
+//     gesture; the begin button is that gesture. Check the console.
+//   - No hands found: needs decent light; the AI model downloads from a
+//     Google CDN on first load, so first "begin" needs internet.
+//   - Left/right feel swapped: the camera image is mirrored on purpose;
+//     see classifyHands() for how hands are told apart.
+// ============================================================================
+
+// Google's hand-tracking AI, loaded straight from a CDN (no npm install).
 import {
   HandLandmarker,
   FilesetResolver,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
+// The page pieces this script talks to (all defined in index.html).
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -19,6 +52,8 @@ let reverbOn = false;
 let reverbLatch = false;
 let lastNoteName = "—";
 
+// Keeps the drawing canvas matching the window size, sharp on retina
+// screens (dpr = device pixels per CSS pixel, capped at 2 for performance).
 function resizeCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = window.innerWidth * dpr;
@@ -30,6 +65,9 @@ function resizeCanvas() {
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 
+// Builds the "echo fingerprint" for the reverb effect: a few seconds of
+// noise that fades out. The convolver later stamps this fingerprint onto
+// the sound, which is what makes it feel like playing in a big hall.
 function makeImpulseResponse(actx, duration, decay) {
   const sampleRate = actx.sampleRate;
   const length = Math.floor(sampleRate * duration);
@@ -43,6 +81,13 @@ function makeImpulseResponse(actx, duration, decay) {
   return impulse;
 }
 
+// Builds the whole synthesizer and returns handles to its knobs.
+// Picture a small studio: two detuned "sawtooth" oscillators (the main
+// buzzy tone, slightly detuned against each other for warmth) plus a "sine"
+// sub-oscillator one octave down (the body). Those run through a lowpass
+// filter (the tone knob), a volume knob (noteGain), a left-right panner,
+// then split into a dry path and a reverb ("wet") path that rejoin at the
+// master volume, through a loudness meter (analyser), out to the speakers.
 function makeAudio() {
   const actx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -121,6 +166,9 @@ function makeAudio() {
   };
 }
 
+// Glides all three oscillators to a new pitch. setTargetAtTime with a small
+// time constant (0.03s) means "slide there quickly but smoothly" - no harsh
+// pitch jumps.
 function setPitch(freq) {
   const t = audio.ctx.currentTime;
   audio.osc1.frequency.setTargetAtTime(freq, t, 0.03);
@@ -131,6 +179,8 @@ function setPitch(freq) {
 // C major pentatonic gives a friendly, always-in-tune sound.
 const PENTATONIC = [0, 2, 4, 7, 9];
 
+// Snaps any frequency to the nearest note of the pentatonic scale, so
+// wherever your hand lands, it sounds musical - never between the keys.
 function snapPentatonic(freq) {
   const A4 = 440;
   const semi = 12 * Math.log2(freq / A4);
@@ -150,6 +200,7 @@ function snapPentatonic(freq) {
 }
 
 const NOTE_NAMES = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"];
+// Turns a frequency into a display name like "A4" or "C#5" for the HUD.
 function freqToName(freq) {
   const A4 = 440;
   const semi = Math.round(12 * Math.log2(freq / A4));
@@ -158,6 +209,8 @@ function freqToName(freq) {
   return `${NOTE_NAMES[idx]}${octave}`;
 }
 
+// Downloads and starts the hand-tracking AI (runs on the GPU if available,
+// tracks up to 2 hands, 50% confidence minimums).
 async function initHands() {
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
@@ -176,6 +229,8 @@ async function initHands() {
   });
 }
 
+// Asks for the webcam (video only, no mic) and starts playing it into the
+// hidden <video> element.
 async function initCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
@@ -186,6 +241,7 @@ async function initCamera() {
   await video.play();
 }
 
+// Plain distance between two hand landmarks.
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -201,6 +257,9 @@ function classifyHands(landmarks) {
   return { right: sorted[0], left: sorted[1] };
 }
 
+// How pinched is this hand, as a ratio? Thumb tip (4) to index tip (8)
+// distance, divided by hand size (wrist 0 to middle knuckle 9) so the same
+// pinch reads the same whether your hand is near or far from the camera.
 function pinchAmount(hand) {
   const tip = hand[8];
   const thumb = hand[4];
@@ -208,6 +267,12 @@ function pinchAmount(hand) {
   return dist(tip, thumb) / scale; // ~0.2 = pinched, ~1.0 = open
 }
 
+// Turns hand positions into sound, every frame.
+//   right hand: left-right position = pitch, also pans the sound to match;
+//               pinch = note on, release = note off (with a gentle fade)
+//   left hand:  height = master volume and filter brightness;
+//               pinch toggles the reverb (a "latch" makes one pinch = one
+//               toggle, not machine-gun toggling while held)
 function updateAudio(rightHand, leftHand) {
   if (!audio) return;
   const t = audio.ctx.currentTime;
@@ -252,6 +317,9 @@ function updateAudio(rightHand, leftHand) {
   }
 }
 
+// Spawns a few glowing particles at each fingertip (extra from the index
+// finger, the "playing" one). hue = color: 340 magenta (right), 200 blue
+// (left).
 function emitFromHand(hand, hue) {
   if (!hand) return;
   const w = window.innerWidth;
@@ -275,6 +343,8 @@ function emitFromHand(hand, hue) {
   }
 }
 
+// Draws the faint hand skeleton lines connecting the landmarks finger by
+// finger (the arrays are the bone chains of MediaPipe's 21-point hand map).
 function drawHandSkeleton(hand, hue) {
   if (!hand) return;
   const w = window.innerWidth;
@@ -302,6 +372,9 @@ function drawHandSkeleton(hand, hue) {
   }
 }
 
+// Moves, ages and draws all particles. They drift, fall slowly, fade out,
+// and swell with the current loudness (amp). "lighter" blending makes
+// overlapping particles add their light - that is the neon glow.
 function drawParticles(amp) {
   ctx.globalCompositeOperation = "lighter";
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -323,6 +396,10 @@ function drawParticles(amp) {
   ctx.globalCompositeOperation = "source-over";
 }
 
+// The heartbeat: runs once per screen frame via requestAnimationFrame.
+// Each frame: fade the canvas a little (leaving motion trails), read the
+// newest camera frame through the hand AI, turn hands into sound and
+// visuals, then draw particles sized by how loud the synth currently is.
 function loop() {
   // Fade with a translucent overlay to leave trails.
   ctx.fillStyle = "rgba(5, 3, 20, 0.22)";
@@ -355,6 +432,9 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
+// The "begin" button: ask for the camera, load the hand AI, build the
+// synth, fade out the start screen, and start the loop. Browsers require a
+// click like this before audio or camera are allowed to start.
 startBtn.addEventListener("click", async () => {
   startBtn.disabled = true;
   startBtn.textContent = "loading…";
